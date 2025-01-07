@@ -11,6 +11,10 @@ import pandas as pd
 data_dir = Path("data")
 data_dir.mkdir(exist_ok=True)
 
+slicer_length = 10**6
+st.session_state.start_row = 0
+st.session_state.end_row = slicer_length//10
+
 # Functions Definition
 def detect_delimiter(file_path):
     with open(file_path, 'r') as file:
@@ -27,25 +31,27 @@ def extract_error_line_number(error_message):
     else:
         return None
 
-def read_file_without_errors(file_path, delimiter=None, skip_rows=[], nrows=None):
+@st.cache_data
+def read_file_without_errors(file_path, delimiter=None, skip_rows=[], offset=0, nrows=None):
     while True:
         if delimiter is None:
             delimiter = detect_delimiter(file_path)
         try:
             if nrows is not None:
-                data = pd.read_csv(file_path, sep=delimiter, skiprows=lambda x : x+1 in skip_rows, nrows=nrows)
+                data = pd.read_csv(file_path, sep=delimiter, skiprows=list(range(offset)).extend([x+1 for x in skip_rows]), nrows=nrows)
             else:
-                data = pd.read_csv(file_path, sep=delimiter, skiprows=lambda x : x+1 in skip_rows)
+                data = pd.read_csv(file_path, sep=delimiter, skiprows=list(range(offset)).extend([x+1 for x in skip_rows]))
         except pd.errors.ParserError as pe :
             error_line = extract_error_line_number(str(pe))
             print(f"Error in line {error_line}")
             skip_rows.append(error_line)
-            data = read_file_without_errors(file_path, delimiter, skip_rows, nrows)
+            data = read_file_without_errors(file_path, delimiter, skip_rows, offset, nrows)
         return data
     
-def load_csv(file_path):
+@st.cache_data
+def load_csv(file_path, offset=0, nrows=None):
     try:
-        return read_file_without_errors(file_path)
+        return read_file_without_errors(file_path, offset=offset, nrows=nrows)
     except Exception as e:
         st.error(f"Error loading file ({file_path}) : {str(e)}")
         return None
@@ -92,8 +98,37 @@ def app():
         st.info("No CSV files available. Please upload one.")
         selected_file = None
 
+
     if selected_file:
-        df = load_csv(selected_file)
+        # Create a range slider for start and end row indices
+        start_end_indices = st.slider(
+            "Select Start and End Row Indices",
+            0,  # Minimum value (start of DataFrame)
+            slicer_length,  # Maximum value (end of DataFrame)
+            (st.session_state.start_row, st.session_state.end_row),  # Default start and end values
+        )
+
+        # Extract start and end row indices from the slider
+        st.session_state.start_row, st.session_state.end_row = start_end_indices
+        
+        # col1, col2 = st.columns(2)
+        # st.session_state.start_row = col1.number_input(
+        #     "Start Row",
+        #     min_value=0,
+        #     max_value=slicer_length,
+        #     value=st.session_state.start_row,
+        #     step=1
+        # )
+        # st.session_state.end_row = col2.number_input(
+        #     "End Row",
+        #     min_value=st.session_state.start_row,
+        #     max_value=slicer_length,
+        #     value=st.session_state.end_row,
+        #     step=1
+        # )
+        # st.write(f"Selected Rows from {st.session_state.start_row} to {st.session_state.end_row}.")
+
+        df = load_csv(selected_file, offset=st.session_state.start_row, nrows=st.session_state.end_row - st.session_state.start_row + 1)
         
         if df is not None:
             # Filter section
