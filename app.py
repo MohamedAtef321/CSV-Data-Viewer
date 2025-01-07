@@ -4,14 +4,27 @@ import os
 import csv
 from pathlib import Path
 import re
-import csv
-import pandas as pd
+import json
+
 
 # Create data directory if it doesn't exist
 data_dir = Path("data")
 data_dir.mkdir(exist_ok=True)
 
-slicer_length = 10**6
+
+def load_config(file_path):
+    try:
+        with open(file_path, "r") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        st.error(f"Configuration file '{file_path}' not found.")
+        return None
+
+
+config = load_config("config.json")
+# Retrieve the password
+APP_PASSWORD = config.get("password")
+slicer_length = config.get("slicer_length")
 st.session_state.start_row = 0
 st.session_state.end_row = slicer_length//10
 
@@ -37,10 +50,17 @@ def read_file_without_errors(file_path, delimiter=None, skip_rows=[], offset=0, 
         if delimiter is None:
             delimiter = detect_delimiter(file_path)
         try:
+            df_headers = list(pd.read_csv(file_path, sep=delimiter, nrows=0).columns)
+            skip_rows_list = [0]
+            skip_rows_list.extend(list(range(1, offset+1)))
+            skip_rows_list.extend([x+1 for x in skip_rows])
             if nrows is not None:
-                data = pd.read_csv(file_path, sep=delimiter, skiprows=list(range(offset)).extend([x+1 for x in skip_rows]), nrows=nrows)
+                data = pd.read_csv(file_path, sep=delimiter, 
+                                   skiprows=skip_rows_list, nrows=nrows,
+                                   names=df_headers)
             else:
-                data = pd.read_csv(file_path, sep=delimiter, skiprows=list(range(offset)).extend([x+1 for x in skip_rows]))
+                data = pd.read_csv(file_path, sep=delimiter, skiprows=skip_rows_list,
+                                   names=df_headers)
         except pd.errors.ParserError as pe :
             error_line = extract_error_line_number(str(pe))
             print(f"Error in line {error_line}")
@@ -102,35 +122,38 @@ def app():
 
     if selected_file:
         # Create a range slider for start and end row indices
-        start_end_indices = st.slider(
-            "Select Start and End Row Indices",
-            0,  # Minimum value (start of DataFrame)
-            slicer_length,  # Maximum value (end of DataFrame)
-            (st.session_state.start_row, st.session_state.end_row),  # Default start and end values
-        )
+        # start_end_indices = st.slider(
+        #     "Select Start and End Row Indices",
+        #     0,  # Minimum value (start of DataFrame)
+        #     slicer_length,  # Maximum value (end of DataFrame)
+        #     (st.session_state.start_row, st.session_state.end_row),  # Default start and end values
+        # )
 
         # Extract start and end row indices from the slider
-        st.session_state.start_row, st.session_state.end_row = start_end_indices
+        # st.session_state.start_row, st.session_state.end_row = start_end_indices
         
-        # col1, col2 = st.columns(2)
-        # st.session_state.start_row = col1.number_input(
-        #     "Start Row",
-        #     min_value=0,
-        #     max_value=slicer_length,
-        #     value=st.session_state.start_row,
-        #     step=1
-        # )
-        # st.session_state.end_row = col2.number_input(
-        #     "End Row",
-        #     min_value=st.session_state.start_row,
-        #     max_value=slicer_length,
-        #     value=st.session_state.end_row,
-        #     step=1
-        # )
-        # st.write(f"Selected Rows from {st.session_state.start_row} to {st.session_state.end_row}.")
-
-        df = load_csv(selected_file, offset=st.session_state.start_row, nrows=st.session_state.end_row - st.session_state.start_row + 1)
+        col1, col2 = st.columns(2)
+        st.session_state.start_row = col1.number_input(
+            "Start Row",
+            min_value=0,
+            max_value=slicer_length,
+            value=st.session_state.start_row,
+            step=1
+        )
+        st.session_state.end_row = col2.number_input(
+            "End Row",
+            min_value=st.session_state.start_row,
+            max_value=slicer_length,
+            value=st.session_state.end_row,
+            step=1
+        )
+        st.write(f"Selected Rows from {st.session_state.start_row} to {st.session_state.end_row}.")
         
+        # df_headers = list(pd.read_csv(selected_file, sep="\t", nrows=0).columns)
+        # df = pd.read_csv(selected_file, sep="\t", names=df_headers, 
+        #                  skiprows=st.session_state.start_row + 1, nrows=st.session_state.end_row - st.session_state.start_row)
+        df = load_csv(selected_file, offset=st.session_state.start_row, nrows=st.session_state.end_row - st.session_state.start_row)
+        data_df = df.copy()
         if df is not None:
             # Filter section
             st.subheader("Filter Data")
@@ -202,9 +225,9 @@ def app():
                         )
                         # Apply non-null filtering if selected
                         if non_null_option == "Exists":
-                            df = df[df[selected_column].notna()]
+                            data_df = df[df[selected_column].notna()]
                         elif non_null_option == "Doesn't exist":
-                            df = df[df[selected_column].isna()]
+                            data_df = df[df[selected_column].isna()]
                     with col4:
                         if st.button("Remove", key=f"remove_{filter_id}", type="primary", help="Remove this filter"):
                             st.session_state.active_filters.remove(filter_id)
@@ -213,7 +236,7 @@ def app():
                                 
             # Search button
             if st.button("Search", type="primary", use_container_width=True, key="search_button"):
-                filtered_df = df.copy()
+                filtered_df = data_df.copy()
                 
                 # Apply all active filters
                 for filter_id, filter_info in st.session_state.filter_values.items():
@@ -244,20 +267,7 @@ def app():
                         mime="text/csv"
                     )
 
-import json
 
-# Load the password from config.json
-def load_password():
-    try:
-        with open("config.json", "r") as file:
-            config = json.load(file)
-            return config.get("password")
-    except FileNotFoundError:
-        st.error("Configuration file 'config.json' not found.")
-        return None
-
-# Retrieve the password
-APP_PASSWORD = load_password()
 
 # Set page configuration
 st.set_page_config(page_title="CSV Data Viewer", layout="wide")
