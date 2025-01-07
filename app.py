@@ -45,6 +45,7 @@ def read_file_without_errors(file_path, delimiter=None, skip_rows=[], offset=0, 
             error_line = extract_error_line_number(str(pe))
             print(f"Error in line {error_line}")
             skip_rows.append(error_line)
+            data = None
             data = read_file_without_errors(file_path, delimiter, skip_rows, offset, nrows)
         return data
     
@@ -172,7 +173,8 @@ def app():
                                     'value': st.multiselect(
                                         f"Filter values for {selected_column}",
                                         options=unique_values,
-                                        key=f"val_{filter_id}"
+                                        key=f"val_{filter_id}",
+                                        default=st.session_state.filter_values.get(filter_id, {}).get('value', [])
                                     ),
                                     'type': 'categorical'
                                 }
@@ -229,7 +231,7 @@ def app():
                 # Display data
                 filtered_df.reset_index(drop=True, inplace=True)
                 st.subheader("Data Preview")
-                st.write(f"Filtered Data ({filtered_df.shape[0]} rows)")
+                st.write(f"Filtered Data ({filtered_df.shape[0]} / {df.shape[0]}) rows, starting from {st.session_state.start_row} to {st.session_state.end_row}.")
                 st.dataframe(filtered_df)
 
                 # Download button
